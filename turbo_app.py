@@ -1,86 +1,95 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-import os
 from datetime import datetime
 
+# Configuración de la página
 st.set_page_config(page_title="Ficha Técnica Turbocharger", layout="centered")
 
-st.title("📋 Ficha Técnica de Inspección Turbocharger")
+# Título
+st.title("📋 Ficha Técnica de Inspección")
 st.markdown("---")
+
+# --- CONEXIÓN CON GOOGLE SHEETS ---
+# Esto busca las credenciales que guardaste en Secrets
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# Función para cargar datos actuales
+def cargar_datos():
+    try:
+        return conn.read(worksheet="Hoja 1", usecols=list(range(10)), ttl=5)
+    except Exception:
+        return pd.DataFrame()
 
 # --- MENÚ LATERAL ---
 menu = st.sidebar.selectbox(
     "Selecciona el Módulo",
-    ["Mantenimiento Preventivo", "Historial de Registros", "Diagnóstico Inteligente"]
+    ["Nueva Inspección", "Historial en la Nube"]
 )
 
-if menu == "Mantenimiento Preventivo":
-    st.header("🔧 Nueva Inspección Técnica")
+if menu == "Nueva Inspección":
+    st.header("🔧 Registrar Nuevo Turbo")
     
     col1, col2 = st.columns(2)
     with col1:
-        operador = st.text_input("Técnico Responsable", "Mecánico Turno 1")
+        operador = st.text_input("Técnico Responsable")
     with col2:
-        modelo = st.text_input("Modelo del Turbo", "G3520C")
+        modelo = st.text_input("Modelo del Turbo")
         horas = st.number_input("Horas de trabajo", min_value=0)
 
-    st.subheader("1. Estado Físico y Lubricación")
+    st.subheader("1. Estado Físico")
     col_a, col_b = st.columns(2)
     with col_a:
-        visual = st.selectbox("Inspección Visual", ["OK", "Golpes/Rajaduras", "Suciedad Excesiva"])
-        ingreso_aceite = st.radio("Ingreso Aceite", ["Sí", "No"], horizontal=True)
+        visual = st.selectbox("Inspección Visual", ["OK", "Golpes/Rajaduras", "Suciedad"])
+        ingreso_aceite = st.selectbox("Ingreso Aceite", ["No", "Sí"])
     with col_b:
-        fugas = st.selectbox("Fugas de Gases", ["No", "Leves", "Criticas"])
-        retorno_aceite = st.radio("Retorno Aceite", ["Fluido", "Obstruido"], horizontal=True)
+        juego_axial = st.number_input("Juego AXIAL (mm)", format="%.3f")
+        juego_radial = st.number_input("Juego RADIAL (mm)", format="%.3f")
 
-    st.subheader("2. Metrología (Juegos del Eje)")
-    col_med1, col_med2 = st.columns(2)
-    with col_med1:
-        axial = st.number_input("Juego AXIAL (mm)", format="%.3f", step=0.01)
-    with col_med2:
-        radial = st.number_input("Juego RADIAL (mm)", format="%.3f", step=0.01)
+    retorno_aceite = st.selectbox("Retorno de Aceite", ["Fluido", "Obstruido"])
+    comentarios = st.text_area("Observaciones")
 
-    comentarios = st.text_area("Observaciones Adicionales:")
-
-    if st.button("💾 GUARDAR INSPECCIÓN EN EXCEL"):
-        # Crear la fila de datos
-        datos_nuevos = {
-            "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "Técnico": operador,
-            "Modelo": modelo,
-            "Horas": horas,
-            "Visual": visual,
-            "Juego Axial": axial,
-            "Juego Radial": radial,
-            "Ingreso Aceite": ingreso_aceite,
-            "Retorno Aceite": retorno_aceite,
-            "Comentarios": comentarios
-        }
-        
-        # Guardar en archivo CSV (Excel)
-        archivo = "reporte_turbos.csv"
-        df_nuevo = pd.DataFrame([datos_nuevos])
-        
-        if not os.path.exists(archivo):
-            df_nuevo.to_csv(archivo, index=False)
+    if st.button("☁️ GUARDAR EN LA NUBE"):
+        if not operador or not modelo:
+            st.warning("⚠️ Por favor ingresa el nombre del técnico y modelo.")
         else:
-            df_nuevo.to_csv(archivo, mode='a', header=False, index=False)
-            
-        st.success("✅ ¡Inspección guardada correctamente en la PC!")
+            # 1. Crear la fila nueva
+            nuevo_dato = pd.DataFrame([{
+                "Fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "Técnico": operador,
+                "Modelo": modelo,
+                "Horas": horas,
+                "Visual": visual,
+                "Juego Axial": juego_axial,
+                "Juego Radial": juego_radial,
+                "Ingreso Aceite": ingreso_aceite,
+                "Retorno Aceite": retorno_aceite,
+                "Comentarios": comentarios
+            }])
 
-elif menu == "Historial de Registros":
-    st.header("📂 Historial Guardado")
-    archivo = "reporte_turbos.csv"
-    if os.path.exists(archivo):
-        df = pd.read_csv(archivo)
-        st.dataframe(df) # Muestra la tabla interactiva
-    else:
-        st.info("Aún no hay registros guardados.")
+            # 2. Descargar datos viejos + Unir con el nuevo
+            try:
+                datos_existentes = cargar_datos()
+                datos_actualizados = pd.concat([datos_existentes, nuevo_dato], ignore_index=True)
+                
+                # 3. Subir todo a Google Sheets
+                conn.update(worksheet="Hoja 1", data=datos_actualizados)
+                
+                st.success("✅ ¡Guardado exitosamente en Google Drive!")
+                st.balloons()
+            except Exception as e:
+                st.error(f"Error al conectar con la hoja: {e}")
 
-elif menu == "Diagnóstico Inteligente":
-    st.header("🧠 Asistente de Fallas")
-    sintoma = st.selectbox("Síntoma", ["Seleccionar...", "Humo Azul", "Humo Negro", "Ruido Metálico"])
-    if sintoma == "Humo Azul":
-        st.warning("Posible paso de aceite por sellos.")
-    elif sintoma == "Ruido Metálico":
-        st.error("¡Parar Motor! Posible roce de álabes.")
+elif menu == "Historial en la Nube":
+    st.header("📂 Base de Datos en Vivo")
+    st.info("Estos datos vienen directamente de tu Google Sheet.")
+    
+    # Botón para refrescar datos manualmente
+    if st.button("🔄 Actualizar Tabla"):
+        st.cache_data.clear()
+    
+    try:
+        df = cargar_datos()
+        st.dataframe(df)
+    except Exception as e:
+        st.error("No se pudo cargar la hoja. Verifica que el nombre de la hoja en el Excel sea 'Hoja 1'.")
